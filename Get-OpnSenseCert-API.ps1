@@ -611,6 +611,23 @@ if (-not $pemContent) {
     }
 }
 
+# Strategy 3: check for Base64-encoded PEM (OPNsense 25.7.x returns base64, not raw PEM)
+if (-not $pemContent) {
+    foreach ($prop in $certObj.PSObject.Properties) {
+        if ($prop.Value -is [string] -and $prop.Value.Length -gt 100 -and $prop.Value -notmatch '\s') {
+            $decodedBytes = try { [System.Convert]::FromBase64String($prop.Value) } catch { $null }
+            if ($decodedBytes -and $decodedBytes.Length -gt 50) {
+                $decodedSample = [System.Text.Encoding]::ASCII.GetString($decodedBytes, 0, 50)
+                if ($decodedSample -like "-----BEGIN*") {
+                    $pemContent = [System.Text.Encoding]::ASCII.GetString($decodedBytes)
+                    Write-Host "[OK] Found base64-encoded certificate PEM in field '$($prop.Name)'" -ForegroundColor Green
+                    break
+                }
+            }
+        }
+    }
+}
+
 if (-not $pemContent) {
     # Try generate_file as fallback
     Write-Host "PEM not found in API response. Trying generate_file endpoint..." -ForegroundColor Yellow
@@ -664,6 +681,23 @@ if (-not $keyContent) {
             $keyContent = $prop.Value
             Write-Host "[OK] Found private key in field '$($prop.Name)'" -ForegroundColor Green
             break
+        }
+    }
+}
+
+# Strategy 3: check for Base64-encoded private key (OPNsense 25.7.x)
+if (-not $keyContent) {
+    foreach ($prop in $certObj.PSObject.Properties) {
+        if ($prop.Value -is [string] -and $prop.Value.Length -gt 100 -and $prop.Value -notmatch '\s') {
+            $decodedBytes = try { [System.Convert]::FromBase64String($prop.Value) } catch { $null }
+            if ($decodedBytes -and $decodedBytes.Length -gt 50) {
+                $decodedSample = [System.Text.Encoding]::ASCII.GetString($decodedBytes, 0, 50)
+                if ($decodedSample -like "-----BEGIN *PRIVATE KEY*") {
+                    $keyContent = [System.Text.Encoding]::ASCII.GetString($decodedBytes)
+                    Write-Host "[OK] Found base64-encoded private key in field '$($prop.Name)'" -ForegroundColor Green
+                    break
+                }
+            }
         }
     }
 }
