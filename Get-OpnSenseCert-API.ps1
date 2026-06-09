@@ -209,6 +209,9 @@ if ($missing.Count -gt 0) {
 # ──────────────────────────────────────
 # TLS / SSL configuration (global, before any API calls)
 # ──────────────────────────────────────
+$psMajor = $PSVersionTable.PSVersion.Major
+Write-Host "[SETUP] PowerShell $($PSVersionTable.PSVersion.ToString()), URL: $script:OpnsenseUrl" -ForegroundColor DarkGray
+
 # Enable TLS 1.2+ (needed by most OPNsense versions)
 [System.Net.ServicePointManager]::SecurityProtocol = `
     [System.Net.SecurityProtocolType]::Tls12 -bor `
@@ -218,16 +221,21 @@ if ($missing.Count -gt 0) {
 
 # Bypass SSL certificate validation if -Insecure or OPNSENSE_INSECURE=true
 if ($Insecure -and $script:OpnsenseUrl -match '^https://') {
-    Write-Host "[SETUP] Insecure mode: SSL cert validation disabled" -ForegroundColor Yellow
-    Add-Type -TypeDefinition @"
-        using System.Net;
-        using System.Security.Cryptography.X509Certificates;
-        public class TrustAllPolicy : ICertificatePolicy {
-            public bool CheckValidationResult(ServicePoint sp, X509Certificate c, WebRequest r, int p) { return true; }
-        }
+    if ($psMajor -ge 6) {
+        Write-Host "[SETUP] Insecure mode: using Invoke-RestMethod -SkipCertificateCheck" -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "[SETUP] Insecure mode: using ServicePointManager callback" -ForegroundColor Yellow
+        Add-Type -TypeDefinition @"
+            using System.Net;
+            using System.Security.Cryptography.X509Certificates;
+            public class TrustAllPolicy : ICertificatePolicy {
+                public bool CheckValidationResult(ServicePoint sp, X509Certificate c, WebRequest r, int p) { return true; }
+            }
 "@ -ErrorAction SilentlyContinue | Out-Null
-    [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllPolicy
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+        [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllPolicy
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    }
 }
 else {
     Write-Host "[SETUP] Secure mode: SSL cert validation enabled" -ForegroundColor DarkGray
@@ -266,6 +274,11 @@ function New-OpnsenseApiRequest {
         Method      = $Method
         Headers     = $headers
         ContentType = "application/json"
+    }
+
+    # PS 6+ uses -SkipCertificateCheck; PS 5.x uses global ServicePointManager callback
+    if ($Insecure -and $url -match '^https://' -and $psMajor -ge 6) {
+        $params.SkipCertificateCheck = $true
     }
 
     try {
@@ -320,12 +333,19 @@ function New-OpnsenseApiDownload {
         Accept        = "*/*"
     }
 
-    if ($Insecure -and $url -match '^https://') {
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    $dlParams = @{
+        Uri     = $url
+        Method  = "GET"
+        Headers = $headers
+        OutFile = $OutputPath
+    }
+    # PS 6+ uses -SkipCertificateCheck; PS 5.x uses global ServicePointManager callback
+    if ($Insecure -and $url -match '^https://' -and $psMajor -ge 6) {
+        $dlParams.SkipCertificateCheck = $true
     }
 
     try {
-        Invoke-RestMethod -Uri $url -Method GET -Headers $headers -OutFile $OutputPath
+        Invoke-RestMethod @dlParams
         return $true
     }
     catch {
