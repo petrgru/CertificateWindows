@@ -241,6 +241,13 @@ function New-OpnsenseApiRequest {
         ContentType = "application/json"
     }
 
+    # Ensure TLS 1.2+ is available (needed by most OPNsense versions)
+    [System.Net.ServicePointManager]::SecurityProtocol = `
+        [System.Net.SecurityProtocolType]::Tls12 -bor `
+        [System.Net.SecurityProtocolType]::Tls13 -bor `
+        [System.Net.SecurityProtocolType]::Tls11 -bor `
+        [System.Net.SecurityProtocolType]::Tls
+
     if ($Insecure -and $url -match '^https://') {
         if (-not [System.Net.ServicePointManager]::CertificatePolicy -or
             [System.Net.ServicePointManager]::CertificatePolicy.ToString() -notlike "*TrustAll") {
@@ -261,16 +268,30 @@ function New-OpnsenseApiRequest {
         return $response
     }
     catch {
-        $statusCode = $_.Exception.Response.StatusCode.value__
-        $statusDesc = $_.Exception.Response.StatusCode
+        $ex = $_.Exception
+        $innerMsg = if ($ex.InnerException) { $ex.InnerException.Message } else { "" }
+        $statusCode = ""
+        $statusDesc = ""
         $body = ""
-        try {
-            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-            $body = $reader.ReadToEnd()
-            $reader.Close()
+        if ($ex.Response) {
+            try {
+                $statusCode = $ex.Response.StatusCode.value__
+                $statusDesc = $ex.Response.StatusCode
+                $reader = New-Object System.IO.StreamReader($ex.Response.GetResponseStream())
+                $body = $reader.ReadToEnd()
+                $reader.Close()
+            }
+            catch { }
         }
-        catch { }
-        throw "API $Method $Endpoint returned $statusCode ($statusDesc)`n$body"
+        if ($body) {
+            throw "API $Method $Endpoint returned $statusCode ($statusDesc)`n$body"
+        }
+        elseif ($innerMsg) {
+            throw "API $Method $Endpoint failed — $innerMsg"
+        }
+        else {
+            throw "API $Method $Endpoint failed — $($ex.Message)"
+        }
     }
 }
 
