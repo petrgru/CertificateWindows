@@ -765,10 +765,9 @@ if (-not $p12Created) {
 Write-Host "[OK] Created: $p12Path" -ForegroundColor Green
 
 # Clean up temp .pem and .key files (keep only .p12)
-if (Test-Path $pemPath -and -not $pemFromFile) { Remove-Item $pemPath -Force -ErrorAction SilentlyContinue }
-if (Test-Path $keyPath -and -not $keyFromFile) { Remove-Item $keyPath -Force -ErrorAction SilentlyContinue }
-# Also clean up key from generate_file (it's bundled in .p12 now)
-if ($keyFromFile -and (Test-Path $keyPath)) { Remove-Item $keyPath -Force -ErrorAction SilentlyContinue }
+# All intermediate files are bundled into .p12, so clean everything
+if (Test-Path $pemPath) { Remove-Item $pemPath -Force -ErrorAction SilentlyContinue }
+if (Test-Path $keyPath) { Remove-Item $keyPath -Force -ErrorAction SilentlyContinue }
 
 # ──────────────────────────────────────
 # STEP 6: Verify .p12 file
