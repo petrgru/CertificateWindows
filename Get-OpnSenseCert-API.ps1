@@ -294,7 +294,7 @@ function Invoke-CurlApiRequest {
         if (-not $rawJson) {
             throw "curl returned empty response"
         }
-        return ($rawJson | ConvertFrom-Json -Depth 100)
+        return ($rawJson | ConvertFrom-Json)
     }
     catch {
         throw "curl returned invalid JSON: $rawJson"
