@@ -207,6 +207,33 @@ if ($missing.Count -gt 0) {
 }
 
 # ──────────────────────────────────────
+# TLS / SSL configuration (global, before any API calls)
+# ──────────────────────────────────────
+# Enable TLS 1.2+ (needed by most OPNsense versions)
+[System.Net.ServicePointManager]::SecurityProtocol = `
+    [System.Net.SecurityProtocolType]::Tls12 -bor `
+    [System.Net.SecurityProtocolType]::Tls13 -bor `
+    [System.Net.SecurityProtocolType]::Tls11 -bor `
+    [System.Net.SecurityProtocolType]::Tls
+
+# Bypass SSL certificate validation if -Insecure or OPNSENSE_INSECURE=true
+if ($Insecure -and $script:OpnsenseUrl -match '^https://') {
+    Write-Host "[SETUP] Insecure mode: SSL cert validation disabled" -ForegroundColor Yellow
+    Add-Type -TypeDefinition @"
+        using System.Net;
+        using System.Security.Cryptography.X509Certificates;
+        public class TrustAllPolicy : ICertificatePolicy {
+            public bool CheckValidationResult(ServicePoint sp, X509Certificate c, WebRequest r, int p) { return true; }
+        }
+"@ -ErrorAction SilentlyContinue | Out-Null
+    [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllPolicy
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+}
+else {
+    Write-Host "[SETUP] Secure mode: SSL cert validation enabled" -ForegroundColor DarkGray
+}
+
+# ──────────────────────────────────────
 # Helper functions
 # ──────────────────────────────────────
 function Test-CommandAvailable {
@@ -239,28 +266,6 @@ function New-OpnsenseApiRequest {
         Method      = $Method
         Headers     = $headers
         ContentType = "application/json"
-    }
-
-    # Ensure TLS 1.2+ is available (needed by most OPNsense versions)
-    [System.Net.ServicePointManager]::SecurityProtocol = `
-        [System.Net.SecurityProtocolType]::Tls12 -bor `
-        [System.Net.SecurityProtocolType]::Tls13 -bor `
-        [System.Net.SecurityProtocolType]::Tls11 -bor `
-        [System.Net.SecurityProtocolType]::Tls
-
-    if ($Insecure -and $url -match '^https://') {
-        if (-not [System.Net.ServicePointManager]::CertificatePolicy -or
-            [System.Net.ServicePointManager]::CertificatePolicy.ToString() -notlike "*TrustAll") {
-            Add-Type -TypeDefinition @"
-                using System.Net;
-                using System.Security.Cryptography.X509Certificates;
-                public class TrustAllPolicy : ICertificatePolicy {
-                    public bool CheckValidationResult(ServicePoint sp, X509Certificate c, WebRequest r, int p) { return true; }
-                }
-"@ -ErrorAction SilentlyContinue | Out-Null
-            [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllPolicy
-        }
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
     }
 
     try {
