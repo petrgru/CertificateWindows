@@ -249,6 +249,76 @@ function Test-CommandAvailable {
     $null -ne (Get-Command $Command -ErrorAction SilentlyContinue)
 }
 
+# Build the Authorization header value
+function New-BasicAuthHeader {
+    $credBytes = [Text.Encoding]::ASCII.GetBytes("${script:ApiKey}:${script:ApiSecret}")
+    $credBase64 = [Convert]::ToBase64String($credBytes)
+    return "Basic $credBase64"
+}
+
+# Detect whether an exception is an SSL/certificate error
+function Test-SslError {
+    param($Exception)
+    $msg = $Exception.Message
+    if ($Exception.InnerException) { $msg += " " + $Exception.InnerException.Message }
+    # Common SSL error keywords across locales
+    $keywords = @("certificate", "ssl", "tls", "authentication", "schannel",
+                  "certifikát", "certificado", "zertifikat", "certificat",
+                  "chain", "trust", "remoteserver")
+    foreach ($kw in $keywords) {
+        if ($msg -match $kw) { return $true }
+    }
+    return $false
+}
+
+# Make an API request using curl.exe (for SSL-bypass scenarios where Invoke-RestMethod fails)
+function Invoke-CurlApiRequest {
+    param(
+        [string]$Method = "GET",
+        [string]$Url,
+        [string]$AuthHeader
+    )
+    $credArg = "-u", "${script:ApiKey}:${script:ApiSecret}"
+    $curlArgs = @("-s", "-X", $Method, $credArg)
+    if ($Insecure) { $curlArgs += "-k" }
+    $curlArgs += $Url
+
+    Write-Host "  [curl] Invoke-RestMethod failed, retrying with curl.exe ..." -ForegroundColor DarkYellow
+    $jsonText = & "curl.exe" @curlArgs 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $errText = ($jsonText | Out-String).Trim()
+        throw "curl exit code $LASTEXITCODE`: $errText"
+    }
+    try {
+        return ($jsonText | Out-String | ConvertFrom-Json)
+    }
+    catch {
+        throw "curl returned invalid JSON: $($jsonText | Out-String)"
+    }
+}
+
+# Download a file using curl.exe (SSL-bypass fallback)
+function Invoke-CurlApiDownload {
+    param(
+        [string]$Url,
+        [string]$OutputPath
+    )
+    $credArg = "-u", "${script:ApiKey}:${script:ApiSecret}"
+    $curlArgs = @("-s", "-o", $OutputPath, $credArg)
+    if ($Insecure) { $curlArgs += "-k" }
+    $curlArgs += $Url
+
+    Write-Host "  [curl] Invoke-RestMethod failed, retrying with curl.exe ..." -ForegroundColor DarkYellow
+    & "curl.exe" @curlArgs 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "curl download failed with exit code $LASTEXITCODE"
+    }
+    if ((Test-Path $OutputPath) -and ((Get-Item $OutputPath).Length -gt 0)) {
+        return $true
+    }
+    throw "curl download produced empty file"
+}
+
 function New-OpnsenseApiRequest {
     param(
         [string]$Method = "GET",
@@ -262,10 +332,9 @@ function New-OpnsenseApiRequest {
         $url += "?" + ($pairs -join "&")
     }
 
-    $credBytes = [Text.Encoding]::ASCII.GetBytes("${script:ApiKey}:${script:ApiSecret}")
-    $credBase64 = [Convert]::ToBase64String($credBytes)
+    $authHeader = New-BasicAuthHeader
     $headers = @{
-        Authorization = "Basic $credBase64"
+        Authorization = $authHeader
         Accept        = "application/json"
     }
 
@@ -276,22 +345,22 @@ function New-OpnsenseApiRequest {
         ContentType = "application/json"
     }
 
-    # PS 6+ uses -SkipCertificateCheck; PS 5.x uses global ServicePointManager callback
+    # PS 6+ uses -SkipCertificateCheck
     if ($Insecure -and $url -match '^https://' -and $psMajor -ge 6) {
         $params.SkipCertificateCheck = $true
     }
 
     try {
-        $response = Invoke-RestMethod @params
-        return $response
+        return (Invoke-RestMethod @params)
     }
     catch {
         $ex = $_.Exception
-        $innerMsg = if ($ex.InnerException) { $ex.InnerException.Message } else { "" }
-        $statusCode = ""
-        $statusDesc = ""
-        $body = ""
+
+        # Check if it's a response-level error (got HTTP response with error code)
         if ($ex.Response) {
+            $statusCode = ""
+            $statusDesc = ""
+            $body = ""
             try {
                 $statusCode = $ex.Response.StatusCode.value__
                 $statusDesc = $ex.Response.StatusCode
@@ -300,16 +369,18 @@ function New-OpnsenseApiRequest {
                 $reader.Close()
             }
             catch { }
-        }
-        if ($body) {
             throw "API $Method $Endpoint returned $statusCode ($statusDesc)`n$body"
         }
-        elseif ($innerMsg) {
-            throw "API $Method $Endpoint failed - $innerMsg"
+
+        # SSL / connection error — try curl fallback
+        if ($Insecure -and $url -match '^https://' -and (Test-CommandAvailable "curl.exe")) {
+            return (Invoke-CurlApiRequest -Method $Method -Url $url -AuthHeader $authHeader)
         }
-        else {
-            throw "API $Method $Endpoint failed - $($ex.Message)"
-        }
+
+        # Generic error, no fallback available
+        $innerMsg = if ($ex.InnerException) { $ex.InnerException.Message } else { "" }
+        if ($innerMsg) { throw "API $Method $Endpoint failed - $innerMsg" }
+        else { throw "API $Method $Endpoint failed - $($ex.Message)" }
     }
 }
 
@@ -326,10 +397,9 @@ function New-OpnsenseApiDownload {
         $url += "?" + ($pairs -join "&")
     }
 
-    $credBytes = [Text.Encoding]::ASCII.GetBytes("${script:ApiKey}:${script:ApiSecret}")
-    $credBase64 = [Convert]::ToBase64String($credBytes)
+    $authHeader = New-BasicAuthHeader
     $headers = @{
-        Authorization = "Basic $credBase64"
+        Authorization = $authHeader
         Accept        = "*/*"
     }
 
@@ -339,7 +409,7 @@ function New-OpnsenseApiDownload {
         Headers = $headers
         OutFile = $OutputPath
     }
-    # PS 6+ uses -SkipCertificateCheck; PS 5.x uses global ServicePointManager callback
+    # PS 6+ uses -SkipCertificateCheck
     if ($Insecure -and $url -match '^https://' -and $psMajor -ge 6) {
         $dlParams.SkipCertificateCheck = $true
     }
@@ -349,6 +419,18 @@ function New-OpnsenseApiDownload {
         return $true
     }
     catch {
+        $ex = $_.Exception
+
+        # Response-level error (non-SSL) — give up
+        if ($ex.Response) {
+            return $_
+        }
+
+        # SSL / connection error — try curl fallback
+        if ($Insecure -and $url -match '^https://' -and (Test-CommandAvailable "curl.exe")) {
+            return (Invoke-CurlApiDownload -Url $url -OutputPath $OutputPath)
+        }
+
         return $_
     }
 }
