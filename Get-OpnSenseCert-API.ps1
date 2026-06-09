@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Downloads ACME/Let's Encrypt certificates from OPNsense via REST API and
     installs them into the Windows Local Machine certificate store.
@@ -7,7 +7,7 @@
     Uses the OPNsense REST API to search, download, and install certificates
     from the Trust Store into the Windows certificate store.
 
-    No SSH required — uses HTTP(S) + API key authentication.
+    No SSH required -- uses HTTP(S) + API key authentication.
 
     All parameters can be set via .env file (copy .env from .env.example),
     command-line arguments override .env values.
@@ -287,10 +287,10 @@ function New-OpnsenseApiRequest {
             throw "API $Method $Endpoint returned $statusCode ($statusDesc)`n$body"
         }
         elseif ($innerMsg) {
-            throw "API $Method $Endpoint failed — $innerMsg"
+            throw "API $Method $Endpoint failed - $innerMsg"
         }
         else {
-            throw "API $Method $Endpoint failed — $($ex.Message)"
+            throw "API $Method $Endpoint failed - $($ex.Message)"
         }
     }
 }
@@ -426,7 +426,7 @@ else {
             Write-Host "  [$i] UUID: $($match.uuid)  CN: $($match.commonname)  Desc: $($match.descr)"
             $i++
         }
-        # Try to pick the best match — prioritize ACME certs
+        # Try to pick the best match -- prioritize ACME certs
         $acmeMatches = $matchingCerts | Where-Object { $_.descr -like "*ACME*" -or $_.descr -like "*Let's Encrypt*" }
         if ($acmeMatches.Count -eq 1) {
             $target = $acmeMatches
@@ -459,7 +459,7 @@ catch {
     exit 1
 }
 
-# Extract PEM content — the field name varies by OPNsense version
+# Extract PEM content -- the field name varies by OPNsense version
 # Common names: crt_payload, crt, certificate, pem
 $pemContent = $null
 $keyContent = $null
