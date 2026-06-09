@@ -278,20 +278,29 @@ function Invoke-CurlApiRequest {
         [string]$Url,
         [string]$AuthHeader
     )
-    $curlArgs = @("-s", "-X", $Method) + @("-u", "${script:ApiKey}:${script:ApiSecret}")
-    if ($Insecure) { $curlArgs += "-k" }
-    $curlArgs += $Url
-
     Write-Host "  [curl] Invoke-RestMethod failed, retrying with curl.exe ..." -ForegroundColor DarkYellow
-    $jsonText = & "curl.exe" @curlArgs 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        throw "curl exit code $LASTEXITCODE"
-    }
+
+    # Write to temp file to avoid PowerShell pipeline encoding corruption (esp. on Windows)
+    $tmpFile = [System.IO.Path]::GetTempFileName()
+    $outArgs = @("-s", "-X", $Method) + @("-u", "${script:ApiKey}:${script:ApiSecret}")
+    if ($Insecure) { $outArgs += "-k" }
+    $outArgs += @("--output", $tmpFile, $Url)
     try {
-        return ($jsonText -join "`n" | ConvertFrom-Json)
+        & "curl.exe" @outArgs 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "curl exit code $LASTEXITCODE"
+        }
+        $rawJson = [System.IO.File]::ReadAllText($tmpFile).Trim()
+        if (-not $rawJson) {
+            throw "curl returned empty response"
+        }
+        return ($rawJson | ConvertFrom-Json -Depth 100)
     }
     catch {
-        throw "curl returned invalid JSON: $(($jsonText -join "`n"))"
+        throw "curl returned invalid JSON: $rawJson"
+    }
+    finally {
+        if (Test-Path $tmpFile) { Remove-Item $tmpFile -Force }
     }
 }
 
