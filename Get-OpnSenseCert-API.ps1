@@ -278,8 +278,7 @@ function Invoke-CurlApiRequest {
         [string]$Url,
         [string]$AuthHeader
     )
-    $credArg = "-u", "${script:ApiKey}:${script:ApiSecret}"
-    $curlArgs = @("-s", "-X", $Method, $credArg)
+    $curlArgs = @("-s", "-X", $Method) + @("-u", "${script:ApiKey}:${script:ApiSecret}")
     if ($Insecure) { $curlArgs += "-k" }
     $curlArgs += $Url
 
@@ -303,8 +302,7 @@ function Invoke-CurlApiDownload {
         [string]$Url,
         [string]$OutputPath
     )
-    $credArg = "-u", "${script:ApiKey}:${script:ApiSecret}"
-    $curlArgs = @("-s", "-o", $OutputPath, $credArg)
+    $curlArgs = @("-s", "-o", $OutputPath) + @("-u", "${script:ApiKey}:${script:ApiSecret}")
     if ($Insecure) { $curlArgs += "-k" }
     $curlArgs += $Url
 
