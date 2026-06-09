@@ -283,16 +283,15 @@ function Invoke-CurlApiRequest {
     $curlArgs += $Url
 
     Write-Host "  [curl] Invoke-RestMethod failed, retrying with curl.exe ..." -ForegroundColor DarkYellow
-    $jsonText = & "curl.exe" @curlArgs 2>&1
+    $jsonText = & "curl.exe" @curlArgs 2>$null
     if ($LASTEXITCODE -ne 0) {
-        $errText = ($jsonText | Out-String).Trim()
-        throw "curl exit code $LASTEXITCODE`: $errText"
+        throw "curl exit code $LASTEXITCODE"
     }
     try {
-        return ($jsonText | Out-String | ConvertFrom-Json)
+        return ($jsonText -join "`n" | ConvertFrom-Json)
     }
     catch {
-        throw "curl returned invalid JSON: $($jsonText | Out-String)"
+        throw "curl returned invalid JSON: $(($jsonText -join "`n"))"
     }
 }
 
