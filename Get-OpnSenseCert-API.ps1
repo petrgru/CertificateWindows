@@ -294,7 +294,16 @@ function Invoke-CurlApiRequest {
         if (-not $rawJson) {
             throw "curl returned empty response"
         }
-        return ($rawJson | ConvertFrom-Json)
+        # Try standard ConvertFrom-Json; fall back to .NET JavaScriptSerializer
+        try {
+            return (ConvertFrom-Json -InputObject $rawJson)
+        }
+        catch {
+            Add-Type -AssemblyName System.Web.Extensions -ErrorAction Stop
+            $js = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+            $js.MaxJsonLength = $rawJson.Length + 1
+            return $js.DeserializeObject($rawJson)
+        }
     }
     catch {
         throw "curl returned invalid JSON: $rawJson"
